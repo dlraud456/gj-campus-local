@@ -1275,8 +1275,8 @@
       activeSymptomId: 'headache',
       commCatFilter: '전체',
       commUnivFilter: '전체',
-      translatedPosts: {}, // { postId: true/false }
-      translatedComments: {}, // { commentId: true/false }
+      showOriginalPosts: {}, // { postId: true } → 해당 글을 원문으로 보기
+      showOriginalComments: {}, // { commentId: true } → 해당 댓글을 원문으로 보기
       translationCache: {}, // { 'post:id:lang' | 'comment:id:lang': result }
       adminAuthenticated: false
     };
@@ -1710,11 +1710,13 @@
                 아직 조건에 맞는 게시글이 없습니다. 첫 글을 작성해보세요!
               </div>
             ` : filtered.map(post => {
-              const isTranslated = !!appState.translatedPosts[post.id];
-              const cacheKey = `post:${post.id}:${appState.lang}`;
+              const cacheKey = 'post:' + post.id + ':' + appState.lang;
               const cachedTrans = appState.translationCache[cacheKey] || (post.translations && post.translations[appState.lang]) || null;
-              const displayTitle = isTranslated && cachedTrans ? cachedTrans.title : post.title;
-              const displayBody = isTranslated && cachedTrans ? cachedTrans.body : post.body;
+              const canShowTrans = appState.lang !== post.lang && !!cachedTrans;
+              const forceOrig = !!appState.showOriginalPosts[post.id];
+              const isTranslated = canShowTrans && !forceOrig;
+              const displayTitle = isTranslated ? cachedTrans.title : post.title;
+              const displayBody = isTranslated ? cachedTrans.body : post.body;
 
               return `
                 <article class="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm space-y-2.5">
@@ -1731,12 +1733,13 @@
                     <p class="text-xs text-slate-600 mt-1 leading-relaxed">${escapeHtml(displayBody)}</p>
                   </div>
 
-                  <!-- Translate Toggle -->
+                  <!-- Translate Toggle (같은 언어 글에는 표시하지 않음) -->
                   <div class="flex items-center justify-between pt-1">
+                    ${post.lang === appState.lang ? `<span></span>` : `
                     <button type="button" data-action="toggle-translate-post" data-post-id="${post.id}" class="text-[11px] font-bold px-2.5 py-1 rounded-lg ${isTranslated ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'} flex items-center gap-1 transition-colors">
                       <span>🌐</span>
                       <span>${isTranslated ? escapeHtml(t('translate_orig')) : escapeHtml(t('translate_show'))}</span>
-                    </button>
+                    </button>`}
                     <span class="text-[11px] font-medium text-slate-400">by ${escapeHtml(post.author)}</span>
                   </div>
 
@@ -1899,26 +1902,36 @@
       if (!post) return;
       const comments = post.comments || [];
 
+      // 모달 제목도 현재 언어에 맞춰 자동 번역 (원문 보기 상태면 원문)
+      const postCacheKey = 'post:' + post.id + ':' + appState.lang;
+      const postTrans = appState.translationCache[postCacheKey] || (post.translations && post.translations[appState.lang]) || null;
+      const postTranslated = appState.lang !== post.lang && !!postTrans && !appState.showOriginalPosts[post.id];
+      const modalTitle = postTranslated && postTrans.title ? postTrans.title : post.title;
+
       openModal(`
         <div class="p-5 flex flex-col max-h-[82vh]">
           <div class="flex items-center justify-between pb-3 border-b border-slate-100">
-            <h3 class="text-sm font-extrabold text-slate-900 truncate pr-2">💬 ${escapeHtml(post.title)}</h3>
+            <h3 class="text-sm font-extrabold text-slate-900 truncate pr-2">💬 ${escapeHtml(modalTitle)}</h3>
             <button type="button" data-action="close-modal" class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 font-bold shrink-0">✕</button>
           </div>
           <div class="flex-1 overflow-y-auto py-3 space-y-2.5">
             ${comments.length === 0 ? `<p class="text-xs text-slate-400 text-center py-6">첫 번째 댓글을 남겨보세요.</p>` : comments.map(c => {
-              const isTrans = !!appState.translatedComments[c.id];
-              const cCacheKey = `comment:${c.id}:${appState.lang}`;
-              const transText = appState.translationCache[cCacheKey] || (c.translations && c.translations[appState.lang]) || c.text;
+              const cCacheKey = 'comment:' + c.id + ':' + appState.lang;
+              const cTransRaw = appState.translationCache[cCacheKey] || (c.translations && c.translations[appState.lang]) || null;
+              const cTrans = typeof cTransRaw === 'string' ? cTransRaw : (cTransRaw && cTransRaw.text) || null;
+              const cCanShowTrans = appState.lang !== c.lang && !!cTrans;
+              const cForceOrig = !!appState.showOriginalComments[c.id];
+              const isTrans = cCanShowTrans && !cForceOrig;
               return `
                 <div class="bg-slate-50 rounded-xl p-3 space-y-1.5">
                   <div class="flex items-center justify-between text-[11px]">
                     <span class="font-bold text-slate-800">${escapeHtml(c.author)}</span>
+                    ${c.lang === appState.lang ? `` : `
                     <button type="button" data-action="toggle-translate-comment" data-post-id="${post.id}" data-comment-id="${c.id}" class="font-bold text-indigo-600 hover:underline">
                       🌐 ${isTrans ? escapeHtml(t('translate_orig')) : escapeHtml(t('translate_show'))}
-                    </button>
+                    </button>`}
                   </div>
-                  <p class="text-xs text-slate-700 leading-relaxed">${escapeHtml(isTrans ? transText : c.text)}</p>
+                  <p class="text-xs text-slate-700 leading-relaxed">${escapeHtml(isTrans && cTrans ? cTrans : c.text)}</p>
                 </div>
               `;
             }).join('')}
@@ -1940,6 +1953,9 @@
     document.getElementById('lang-select').addEventListener('change', (e) => {
       appState.lang = e.target.value;
       safeStorageSet(STORAGE_KEYS.LANG, appState.lang);
+      // 언어가 바뀌면 '원문 보기' 상태를 초기화해 새 언어로 자동 번역 표시
+      appState.showOriginalPosts = {};
+      appState.showOriginalComments = {};
       renderApp();
     });
 
@@ -2008,11 +2024,20 @@
       } else if (action === 'toggle-translate-post') {
         const pid = target.dataset.postId;
         const post = store.getPosts().find(p => p.id === pid);
-        const cacheKey = `post:${pid}:${appState.lang}`;
-        if (post && !appState.translatedPosts[pid] && !appState.translationCache[cacheKey]) {
-          appState.translationCache[cacheKey] = await translateText(post, appState.lang, false);
+        if (!post) return;
+        const cacheKey = 'post:' + pid + ':' + appState.lang;
+        const cachedTrans = appState.translationCache[cacheKey] || (post.translations && post.translations[appState.lang]) || null;
+        const canShowTrans = appState.lang !== post.lang && !!cachedTrans;
+        if (canShowTrans && !appState.showOriginalPosts[pid]) {
+          // 지금 번역본을 보는 중 → 원문 보기로 전환
+          appState.showOriginalPosts[pid] = true;
+        } else {
+          // 원문을 보는 중 → 내 언어 번역본으로 전환 (캐시가 없으면 번역 실행)
+          appState.showOriginalPosts[pid] = false;
+          if (!cachedTrans) {
+            appState.translationCache[cacheKey] = await translateText(post, appState.lang, false);
+          }
         }
-        appState.translatedPosts[pid] = !appState.translatedPosts[pid];
         renderApp();
       } else if (action === 'open-comments') {
         openCommentsModal(target.dataset.postId);
@@ -2021,11 +2046,20 @@
         const pid = target.dataset.postId;
         const post = store.getPosts().find(p => p.id === pid);
         const comment = post && (post.comments || []).find(c => c.id === cid);
-        const cCacheKey = `comment:${cid}:${appState.lang}`;
-        if (comment && !appState.translatedComments[cid] && !appState.translationCache[cCacheKey]) {
-          appState.translationCache[cCacheKey] = await translateText(comment, appState.lang, true);
+        if (!comment) return;
+        const cCacheKey = 'comment:' + cid + ':' + appState.lang;
+        const cTransRaw = appState.translationCache[cCacheKey] || (comment.translations && comment.translations[appState.lang]) || null;
+        const cCanShowTrans = appState.lang !== comment.lang && !!cTransRaw;
+        if (cCanShowTrans && !appState.showOriginalComments[cid]) {
+          // 지금 번역본을 보는 중 → 원문 보기로 전환
+          appState.showOriginalComments[cid] = true;
+        } else {
+          // 원문을 보는 중 → 내 언어 번역본으로 전환 (캐시가 없으면 번역 실행)
+          appState.showOriginalComments[cid] = false;
+          if (!cTransRaw) {
+            appState.translationCache[cCacheKey] = await translateText(comment, appState.lang, true);
+          }
         }
-        appState.translatedComments[cid] = !appState.translatedComments[cid];
         openCommentsModal(pid);
       } else if (action === 'report-post') {
         store.reportPost(target.dataset.postId);
